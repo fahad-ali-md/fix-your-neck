@@ -1,0 +1,9 @@
+=== F4: Scope Fidelity ===
+
+- No backend added: true
+- No new pose-detection library: true (same MoveNet)
+- No large UI framework: true (no new npm deps)
+- Main camera NOT used as editing surface: true
+- No database/cloud sync: true (localStorage only)
+
+Verdict: PASS

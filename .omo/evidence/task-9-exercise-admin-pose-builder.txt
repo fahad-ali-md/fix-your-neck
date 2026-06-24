@@ -1,0 +1,32 @@
+=== Build Log ===
+
+> fix-your-neck@0.0.0 build
+> tsc && vite build
+
+vite v5.4.21 building for production...
+transforming...
+✓ 1566 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                     0.41 kB │ gzip:   0.28 kB
+dist/assets/index-6piyG1rp.css      6.97 kB │ gzip:   2.11 kB
+dist/assets/index-Lo2VxVHo.js   2,754.90 kB │ gzip: 505.48 kB
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 6.63s
+
+=== Self-Test Results ===
+poseMatching self-test: ALL PASS
+adminExerciseConfig self-test: requires browser (localStorage)
+
+=== Files Created/Modified ===
+     137 src/utils/adminExerciseConfig.ts
+     174 src/utils/poseMatching.ts
+     622 src/App.tsx
+     246 src/App.css
+    1179 total
+
+Build: PASS at Wed Jun 24 18:34:56 +06 2026

@@ -1,0 +1,14 @@
+{
+  "schema_version": 2,
+  "active_work_id": "exercise-admin-pose-builder",
+  "works": {
+    "exercise-admin-pose-builder": {
+      "work_id": "exercise-admin-pose-builder",
+      "active_plan": ".omo/plans/exercise-admin-pose-builder.md",
+      "plan_name": "exercise-admin-pose-builder",
+      "session_ids": ["codex:current"],
+      "status": "active",
+      "worktree_path": null
+    }
+  }
+}

@@ -1,0 +1,27 @@
+=== F1: Plan Compliance Audit ===
+
+Must Have:
+1. PASS: Right-side Settings/admin panel
+2. PASS: Main camera area unchanged
+3. PASS: Separate pose editor canvas
+4. PASS: Draggable green skeleton
+5. PASS: New/Save/Delete/Select pose controls
+6. PASS: localStorage persistence
+7. PASS: Active target pose for webcam
+8. PASS: Live matching feedback
+9. PASS: matchTolerance + holdMs sliders
+10. PASS: Camera readiness rules (shoulder min/max, requireWrists)
+11. PASS: Readiness messages from admin rules
+12. PASS: Export/Reset admin data
+13. PASS: Build passes
+
+Must NOT Have:
+1. PASS: No editing on main webcam canvas
+2. PASS: Live skeleton + face mesh preserved
+3. PASS: No backend/database/cloud
+4. PASS: No new pose detection library
+5. PASS: No large UI framework added
+6. PASS: No webcam images in localStorage
+7. PASS: Build flow unchanged
+
+Verdict: COMPLIANT
