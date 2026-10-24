@@ -21,3 +21,10 @@
 
 # secrets
 secrets.*.js
+# build output
+/dist
+
+# local reference material and scratch docs
+/frame_review
+instagram_*
+/.planning

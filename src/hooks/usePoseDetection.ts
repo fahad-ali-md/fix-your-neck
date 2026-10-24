@@ -21,11 +21,27 @@ export function usePoseDetection() {
   const faceDetectorRef = useRef<faceLandmarks.FaceLandmarksDetector | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const animRef = useRef<number>(0)
+  const lastPoseDetectRef = useRef(0)
+  const detectingPoseRef = useRef(false)
+
+  // ponytail: prefer a real camera over virtual ones (OBS, etc.)
+  const pickCamera = useCallback(async () => {
+    const devices = await navigator.mediaDevices.enumerateDevices()
+    const cameras = devices.filter(d => d.kind === 'videoinput')
+    const real = cameras.find(c => !/virtual|obs|vcam|monitor/i.test(c.label))
+    return real?.deviceId
+  }, [])
 
   const startCamera = useCallback(async () => {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { width: 640, height: 480, facingMode: 'user' }
-    })
+    const preferredId = await pickCamera()
+    const video: MediaTrackConstraints = {
+      width: 640,
+      height: 480,
+      frameRate: { ideal: 30, max: 30 },
+      facingMode: 'user',
+    }
+    if (preferredId) video.deviceId = { exact: preferredId }
+    const stream = await navigator.mediaDevices.getUserMedia({ video })
     streamRef.current = stream
     if (videoRef.current) {
       videoRef.current.srcObject = stream
@@ -65,13 +81,23 @@ export function usePoseDetection() {
         return
       }
 
-      const detect = async () => {
+      const detect = async (timestamp: number) => {
         if (!detectorRef.current || !videoRef.current || cancelled) return
-        const [posesResult] = await Promise.all([
-          detectorRef.current.estimatePoses(videoRef.current),
-        ])
-        if (!cancelled) {
-          setPoses(posesResult as unknown as PoseData[])
+        if (document.hidden) {
+          animRef.current = requestAnimationFrame(detect)
+          return
+        }
+        if (!detectingPoseRef.current && timestamp - lastPoseDetectRef.current >= 66) {
+          detectingPoseRef.current = true
+          lastPoseDetectRef.current = timestamp
+          try {
+            const posesResult = await detectorRef.current.estimatePoses(videoRef.current)
+            if (!cancelled) {
+              setPoses(posesResult as unknown as PoseData[])
+            }
+          } finally {
+            detectingPoseRef.current = false
+          }
         }
         animRef.current = requestAnimationFrame(detect)
       }

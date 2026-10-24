@@ -44,6 +44,26 @@ header h1 { font-size: 1.8rem; font-weight: 700; color: #00ff88; letter-spacing:
 .debug-panel .debug-state { margin-top: 4px; padding-top: 4px; border-top: 1px solid #333; color: #afa; }
 .ear-open  { color: #00ff88; font-weight: 700; }
 .ear-closed { color: #ff4466; font-weight: 700; }
+.kp-row { font-size: 0.75rem; color: #8af; }
+
+/* Posture states (spec Step 10 color coding) */
+.posture-row { font-weight: 700; }
+.posture-good  { color: #00ff88; }
+.posture-slight { color: #ffcc00; }
+.posture-poor  { color: #ff4466; }
+
+.posture-detail {
+  font-size: 0.75rem;
+  opacity: 0.7;
+  margin-top: 2px;
+}
+.posture-sub {
+  font-size: 0.68rem;
+  opacity: 0.5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 .overlay {
   position: absolute;
@@ -58,6 +78,31 @@ header h1 { font-size: 1.8rem; font-weight: 700; color: #00ff88; letter-spacing:
   height: 100%;
   object-fit: contain;
   opacity: 0.6;  /* semi-transparent so skeleton is visible on top */
+}
+
+.camera-readiness {
+  position: absolute;
+  left: 50%;
+  bottom: 22px;
+  transform: translateX(-50%);
+  z-index: 9;
+  max-width: min(520px, calc(100% - 40px));
+  padding: 12px 18px;
+  border-radius: 10px;
+  border: 1px solid #ffaa4433;
+  background: rgba(20, 15, 6, 0.88);
+  color: #ffcc66;
+  font-size: 0.95rem;
+  font-weight: 700;
+  text-align: center;
+  pointer-events: none;
+  backdrop-filter: blur(4px);
+  animation: readiness-in 0.18s ease-out;
+}
+
+@keyframes readiness-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(6px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
 
 /* Zoom in during eye-close exercise so face fills the frame */
@@ -112,6 +157,12 @@ header h1 { font-size: 1.8rem; font-weight: 700; color: #00ff88; letter-spacing:
 }
 
 .start-screen { text-align: center; }
+.start-hint {
+  color: #ffaa44;
+  font-size: 0.9rem;
+  line-height: 1.35;
+  margin-bottom: 16px;
+}
 .start-screen h2 { font-size: 1.4rem; margin-bottom: 12px; color: #fff; }
 .start-screen p { color: #888; margin-bottom: 16px; font-size: 0.9rem; }
 .start-screen ol { text-align: left; padding-left: 20px; margin-bottom: 24px; color: #aaa; line-height: 1.8; font-size: 0.95rem; }
@@ -134,17 +185,33 @@ header h1 { font-size: 1.8rem; font-weight: 700; color: #00ff88; letter-spacing:
 .btn-start, .btn-restart {
   background: #00ff88; color: #0d0d0d; border: none; padding: 14px 48px;
   border-radius: 12px; font-size: 1.1rem; font-weight: 700; cursor: pointer;
-  transition: transform 0.15s, box-shadow 0.15s;
+  transition: transform 0.15s, box-shadow 0.15s, opacity 0.18s, background 0.18s;
 }
-.btn-start:disabled { cursor: not-allowed; }
+.btn-start:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+  background: #555;
+  color: #aaa;
+}
 .btn-start:disabled:hover { transform: none; box-shadow: none; }
 .btn-start:hover, .btn-restart:hover { transform: translateY(-1px); box-shadow: 0 4px 20px rgba(0,255,136,0.3); }
 
 .exercise-display { text-align: center; width: 100%; }
+.routine-title {
+  color: #888;
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
 .exercise-badge { font-size: 1.2rem; font-weight: 700; margin-bottom: 20px; padding: 10px 16px; border-radius: 10px; background: #222; color: #fff; }
-.exercise-badge.head_turn { background: #1a3a2a; color: #00ff88; }
-.exercise-badge.eyes_close { background: #2a1a3a; color: #bb88ff; }
-.exercise-badge.hands_up { background: #3a2a1a; color: #ffbb44; }
+.exercise-badge.calibrate { background: #222; color: #aaa; }
+.exercise-badge.look_right,
+.exercise-badge.look_left { background: #1a3a2a; color: #00ff88; }
+.exercise-badge.look_down { background: #3a2a1a; color: #ffbb44; }
+.exercise-badge.look_up { background: #2a1a3a; color: #bb88ff; }
+.exercise-badge.arms_up,
+.exercise-badge.arms_look_right,
+.exercise-badge.arms_look_left { background: #1a2f3a; color: #66d9ff; }
 .exercise-badge.complete { background: #1a3a2a; color: #00ff88; }
 
 .instruction { font-size: 1.15rem; line-height: 1.5; color: #ccc; min-height: 60px; display: flex; align-items: center; justify-content: center; }

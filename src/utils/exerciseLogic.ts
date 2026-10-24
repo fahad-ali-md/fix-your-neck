@@ -1,5 +1,5 @@
 // ponytail: one file for all exercise detection logic - no class, no OOP
-export type ExerciseState = 'idle' | 'head_turn' | 'eyes_close' | 'hands_up' | 'complete'
+export type ExerciseState = string
 
 // Global mutable configuration for live tweaking
 export const ExerciseConfig = {
@@ -7,6 +7,9 @@ export const ExerciseConfig = {
   slouchRatioMultiplier: 0.85,
   eyeCloseMultiplier: 0.72,
   headTurnAngle: 25,
+  lookSideOffsetRatio: 0.12,
+  lookDownRatio: 0.65,
+  lookUpRatio: 1.12,
   posMinShoulderRatio: 0.15,   // shoulder span / frame width — too far if below
   posMaxShoulderRatio: 0.50,   // too close if above
 }
@@ -15,6 +18,9 @@ export interface ExerciseFeedback {
   instruction: string
   status: 'waiting' | 'in_progress' | 'success'
   progress?: number // 0-1 for timed exercises
+  label?: string
+  routineTitle?: string
+  voice?: string
 }
 
 export interface Keypoint {
@@ -91,130 +97,431 @@ export function bothHandsBesideEars(keypoints: Keypoint[]): boolean {
   return isHandBesideEar(keypoints, 'left') && isHandBesideEar(keypoints, 'right')
 }
 
+function isArmRaised(keypoints: Keypoint[], side: 'left' | 'right'): boolean {
+  const shoulder = kp(keypoints, side === 'left' ? 'left_shoulder' : 'right_shoulder')
+  const elbow = kp(keypoints, side === 'left' ? 'left_elbow' : 'right_elbow')
+  const wrist = kp(keypoints, side === 'left' ? 'left_wrist' : 'right_wrist')
+  if (!shoulder || !elbow || !wrist) return false
+  if (shoulder.score < 0.2 || elbow.score < 0.2 || wrist.score < 0.2) return false
+
+  const raised = elbow.y < shoulder.y + 35 && wrist.y < shoulder.y + 35
+  const outside = side === 'left'
+    ? wrist.x <= shoulder.x
+    : wrist.x >= shoulder.x
+
+  return raised && outside
+}
+
+function bothArmsRaised(keypoints: Keypoint[]): boolean {
+  return isArmRaised(keypoints, 'left') && isArmRaised(keypoints, 'right')
+}
+
 export interface EngineState {
   current: ExerciseState
-  eyeTimer: number       // ms eyes have been closed
-  handTimer: number      // ms hands have been held
-  headTurnPhase: 'left' | 'right' | 'done'
+  holdTimer: number
   feedback: ExerciseFeedback
-  // markers: Record<string, AnchorMarker | undefined>;  
-  // calibration
-  calibSamples: number[] // open-eye EAR readings collected before eye-close
+  calibSamples: number[]
+  neutralHeadHeight: number
+  routineDay: number
+  routineTitle: string
+  stepIndex: number
+  repCount: number
+  repPhase: 'down' | 'neutral'
   eyeThreshold: number   // dynamic per-user threshold (default 0.2, replaced after calib)
 }
 
+type LookDirection = 'right' | 'left' | 'down' | 'up'
+type StepKind = 'calibrate' | 'look' | 'arms_up' | 'chin_tuck' | 'timed'
+
+interface RoutineStep {
+  id: ExerciseState
+  label: string
+  instruction: string
+  voice: string
+  kind: StepKind
+  direction?: LookDirection
+  holdMs?: number
+  durationMs?: number
+  reps?: number
+  requireArms?: boolean
+}
+
+interface Routine {
+  day: number
+  title: string
+  steps: RoutineStep[]
+}
+
+const HOLD_MS = 2000
+const CALIBRATION_SAMPLES = 10
+
+const calibrateStep: RoutineStep = {
+  id: 'calibrate',
+  label: 'Center',
+  instruction: 'Look straight at the camera',
+  voice: 'Look straight at the camera.',
+  kind: 'calibrate',
+}
+
+const step = (stepConfig: RoutineStep): RoutineStep => stepConfig
+
+const routines: Routine[] = [
+  {
+    day: 1,
+    title: 'Mobility Baseline',
+    steps: [
+      calibrateStep,
+      step({ id: 'look_right', label: 'Look Right', instruction: 'Look RIGHT', voice: 'Look right and hold for two seconds.', kind: 'look', direction: 'right', holdMs: HOLD_MS }),
+      step({ id: 'look_left', label: 'Look Left', instruction: 'Look LEFT', voice: 'Look left and hold for two seconds.', kind: 'look', direction: 'left', holdMs: HOLD_MS }),
+      step({ id: 'look_down', label: 'Look Down', instruction: 'Look DOWN', voice: 'Look down and hold for two seconds.', kind: 'look', direction: 'down', holdMs: HOLD_MS }),
+      step({ id: 'look_up', label: 'Look Up', instruction: 'Look UP', voice: 'Look up and hold for two seconds.', kind: 'look', direction: 'up', holdMs: HOLD_MS }),
+      step({ id: 'arms_up', label: 'Hands Up', instruction: 'Raise both hands beside your head', voice: 'Stage two. Raise both hands beside your head and hold.', kind: 'arms_up', holdMs: HOLD_MS }),
+      step({ id: 'arms_look_right', label: 'Hands Up + Right', instruction: 'Keep arms up and look RIGHT', voice: 'Keep your hands up. Look right and hold for two seconds.', kind: 'look', direction: 'right', holdMs: HOLD_MS, requireArms: true }),
+      step({ id: 'arms_look_left', label: 'Hands Up + Left', instruction: 'Keep arms up and look LEFT', voice: 'Keep your hands up. Look left and hold for two seconds.', kind: 'look', direction: 'left', holdMs: HOLD_MS, requireArms: true }),
+    ],
+  },
+  {
+    day: 2,
+    title: 'Posture Reset',
+    steps: [
+      calibrateStep,
+      step({ id: 'chin_tuck_5', label: 'Chin Tuck', instruction: 'Lower your chin, then return to neutral', voice: 'Do five chin tucks. Lower your chin, then return to neutral.', kind: 'chin_tuck', reps: 5 }),
+      step({ id: 'shoulder_squeeze', label: 'Shoulder Squeeze', instruction: 'Squeeze shoulder blades gently', voice: 'Squeeze your shoulder blades gently and hold.', kind: 'timed', durationMs: 8000 }),
+      step({ id: 'look_right', label: 'Look Right', instruction: 'Look RIGHT', voice: 'Look right and hold for two seconds.', kind: 'look', direction: 'right', holdMs: HOLD_MS }),
+      step({ id: 'look_left', label: 'Look Left', instruction: 'Look LEFT', voice: 'Look left and hold for two seconds.', kind: 'look', direction: 'left', holdMs: HOLD_MS }),
+    ],
+  },
+  {
+    day: 3,
+    title: 'Desk Neck Relief',
+    steps: [
+      calibrateStep,
+      step({ id: 'look_down', label: 'Look Down', instruction: 'Look DOWN', voice: 'Look down and hold for two seconds.', kind: 'look', direction: 'down', holdMs: HOLD_MS }),
+      step({ id: 'look_up', label: 'Look Up', instruction: 'Look UP', voice: 'Look up and hold for two seconds.', kind: 'look', direction: 'up', holdMs: HOLD_MS }),
+      step({ id: 'right_side_relax', label: 'Right Side', instruction: 'Gently tilt toward your right shoulder', voice: 'Gently tilt toward your right shoulder.', kind: 'timed', durationMs: 6000 }),
+      step({ id: 'left_side_relax', label: 'Left Side', instruction: 'Gently tilt toward your left shoulder', voice: 'Gently tilt toward your left shoulder.', kind: 'timed', durationMs: 6000 }),
+    ],
+  },
+  {
+    day: 4,
+    title: 'Light Recovery',
+    steps: [
+      calibrateStep,
+      step({ id: 'breathing', label: 'Breathing', instruction: 'Breathe slowly and relax your shoulders', voice: 'Breathe slowly and relax your shoulders.', kind: 'timed', durationMs: 10000 }),
+      step({ id: 'look_right_easy', label: 'Easy Right', instruction: 'Gently look RIGHT', voice: 'Gently look right.', kind: 'look', direction: 'right', holdMs: 1000 }),
+      step({ id: 'look_left_easy', label: 'Easy Left', instruction: 'Gently look LEFT', voice: 'Gently look left.', kind: 'look', direction: 'left', holdMs: 1000 }),
+      step({ id: 'look_down_easy', label: 'Easy Down', instruction: 'Gently look DOWN', voice: 'Gently look down.', kind: 'look', direction: 'down', holdMs: 1000 }),
+      step({ id: 'look_up_easy', label: 'Easy Up', instruction: 'Gently look UP', voice: 'Gently look up.', kind: 'look', direction: 'up', holdMs: 1000 }),
+    ],
+  },
+  {
+    day: 5,
+    title: 'Hands + Neck Coordination',
+    steps: [
+      calibrateStep,
+      step({ id: 'arms_up', label: 'Hands Up', instruction: 'Raise both hands beside your head', voice: 'Raise both hands beside your head and hold.', kind: 'arms_up', holdMs: HOLD_MS }),
+      step({ id: 'arms_look_right', label: 'Hands Up + Right', instruction: 'Keep arms up and look RIGHT', voice: 'Keep your hands up. Look right and hold.', kind: 'look', direction: 'right', holdMs: HOLD_MS, requireArms: true }),
+      step({ id: 'arms_look_left', label: 'Hands Up + Left', instruction: 'Keep arms up and look LEFT', voice: 'Keep your hands up. Look left and hold.', kind: 'look', direction: 'left', holdMs: HOLD_MS, requireArms: true }),
+      step({ id: 'arms_look_down', label: 'Hands Up + Down', instruction: 'Keep arms up and look DOWN', voice: 'Keep your hands up. Look down and hold.', kind: 'look', direction: 'down', holdMs: HOLD_MS, requireArms: true }),
+      step({ id: 'arms_look_up', label: 'Hands Up + Up', instruction: 'Keep arms up and look UP', voice: 'Keep your hands up. Look up and hold.', kind: 'look', direction: 'up', holdMs: HOLD_MS, requireArms: true }),
+    ],
+  },
+  {
+    day: 6,
+    title: 'Strength & Control',
+    steps: [
+      calibrateStep,
+      step({ id: 'chin_tuck_8', label: 'Chin Tuck', instruction: 'Lower your chin, then return to neutral', voice: 'Do eight chin tucks. Lower your chin, then return to neutral.', kind: 'chin_tuck', reps: 8 }),
+      step({ id: 'neutral_hold', label: 'Neutral Hold', instruction: 'Hold a tall neutral posture', voice: 'Hold a tall neutral posture.', kind: 'timed', durationMs: 10000 }),
+      step({ id: 'look_right', label: 'Look Right', instruction: 'Look RIGHT', voice: 'Look right and hold for two seconds.', kind: 'look', direction: 'right', holdMs: HOLD_MS }),
+      step({ id: 'look_left', label: 'Look Left', instruction: 'Look LEFT', voice: 'Look left and hold for two seconds.', kind: 'look', direction: 'left', holdMs: HOLD_MS }),
+    ],
+  },
+  {
+    day: 7,
+    title: 'Assessment Day',
+    steps: [
+      calibrateStep,
+      step({ id: 'look_right', label: 'Look Right', instruction: 'Look RIGHT', voice: 'Look right and hold for two seconds.', kind: 'look', direction: 'right', holdMs: HOLD_MS }),
+      step({ id: 'look_left', label: 'Look Left', instruction: 'Look LEFT', voice: 'Look left and hold for two seconds.', kind: 'look', direction: 'left', holdMs: HOLD_MS }),
+      step({ id: 'look_down', label: 'Look Down', instruction: 'Look DOWN', voice: 'Look down and hold for two seconds.', kind: 'look', direction: 'down', holdMs: HOLD_MS }),
+      step({ id: 'look_up', label: 'Look Up', instruction: 'Look UP', voice: 'Look up and hold for two seconds.', kind: 'look', direction: 'up', holdMs: HOLD_MS }),
+      step({ id: 'neutral_hold', label: 'Posture Check', instruction: 'Hold a comfortable upright posture', voice: 'Hold a comfortable upright posture.', kind: 'timed', durationMs: 10000 }),
+    ],
+  },
+]
+
+export function getTodayRoutine(date = new Date()): Routine {
+  let startDate = ''
+  try {
+    startDate = localStorage.getItem('fyn-routine-start-date') ?? ''
+    if (!startDate) {
+      startDate = date.toISOString().slice(0, 10)
+      localStorage.setItem('fyn-routine-start-date', startDate)
+    }
+  } catch {
+    const day = ((date.getDay() + 6) % 7) + 1
+    return routines[day - 1]
+  }
+
+  const start = new Date(`${startDate}T00:00:00`)
+  const today = new Date(date.toISOString().slice(0, 10) + 'T00:00:00')
+  const elapsedDays = Math.max(0, Math.floor((today.getTime() - start.getTime()) / 86_400_000))
+  const day = (elapsedDays % 7) + 1
+  return routines[day - 1]
+}
+
 export function createEngine(): EngineState {
+  const routine = getTodayRoutine()
   return {
     current: 'idle',
-    eyeTimer: 0,
-    handTimer: 0,
-    headTurnPhase: 'left',
-    feedback: { instruction: 'Click Start to begin', status: 'waiting' },
+    holdTimer: 0,
+    feedback: {
+      instruction: 'Click Start to begin',
+      status: 'waiting',
+      routineTitle: `Day ${routine.day}: ${routine.title}`,
+    },
     calibSamples: [],
+    neutralHeadHeight: 0,
+    routineDay: routine.day,
+    routineTitle: routine.title,
+    stepIndex: 0,
+    repCount: 0,
+    repPhase: 'down',
     eyeThreshold: 0.2,
   }
+}
+
+function headMetrics(keypoints: Keypoint[]): { xOffset: number; headHeight: number } | null {
+  const nose = kp(keypoints, 'nose')
+  const ls = kp(keypoints, 'left_shoulder')
+  const rs = kp(keypoints, 'right_shoulder')
+  if (!nose || !ls || !rs || nose.score < 0.2 || ls.score < 0.2 || rs.score < 0.2) return null
+
+  const shoulderWidth = Math.max(Math.abs(ls.x - rs.x), 1)
+  const shoulderCenterX = (ls.x + rs.x) / 2
+  const shoulderCenterY = (ls.y + rs.y) / 2
+
+  return {
+    xOffset: (nose.x - shoulderCenterX) / shoulderWidth,
+    headHeight: (shoulderCenterY - nose.y) / shoulderWidth,
+  }
+}
+
+function setStepFeedback(e: EngineState, stepConfig: RoutineStep, status: ExerciseFeedback['status'], progress = 0) {
+  e.feedback = {
+    instruction: stepConfig.instruction,
+    status,
+    progress,
+    label: stepConfig.label,
+    routineTitle: `Day ${e.routineDay}: ${e.routineTitle}`,
+    voice: stepConfig.voice,
+  }
+}
+
+function completeCurrentStep(e: EngineState, routine: Routine) {
+  e.stepIndex += 1
+  e.holdTimer = 0
+  e.repCount = 0
+  e.repPhase = 'down'
+
+  const next = routine.steps[e.stepIndex]
+  if (!next) {
+    e.current = 'complete'
+    e.feedback = {
+      instruction: 'Exercise complete!',
+      status: 'success',
+      label: 'Complete!',
+      routineTitle: `Day ${e.routineDay}: ${e.routineTitle}`,
+      voice: 'Exercise complete. Great job.',
+    }
+    return
+  }
+
+  e.current = next.id
+  setStepFeedback(e, next, 'waiting', 0)
 }
 
 export function tickEngine(engine: EngineState, keypoints: Keypoint[], dt: number, faceKps?: Array<{x: number; y: number}>): EngineState {
   const e = { ...engine }
   
-  if (e.current === 'idle') return e
+  if (e.current === 'idle' || e.current === 'complete') return e
 
-  if (e.current === 'head_turn') {
-    const angle = getNeckAngle(keypoints)
-    if (angle === null) {
-      e.feedback = { instruction: 'Look at the camera', status: 'in_progress' }
-      return e
-    }
-      if (e.headTurnPhase === 'left') {
-      if (angle < -ExerciseConfig.headTurnAngle) {
-        e.headTurnPhase = 'right'
-        e.feedback = { instruction: 'Good! Now turn RIGHT →', status: 'in_progress' }
-      } else {
-        e.feedback = { instruction: 'Turn your head LEFT ← (' + Math.round(angle) + '°)', status: 'in_progress' }
-      }
-    } else if (e.headTurnPhase === 'right') {
-      if (angle > ExerciseConfig.headTurnAngle) {
-        e.headTurnPhase = 'done'
-        e.feedback = { instruction: 'Head turns complete!', status: 'success' }
-      } else {
-        e.feedback = { instruction: 'Now turn RIGHT → (' + Math.round(angle) + '°)', status: 'in_progress' }
-      }
-    } else {
-      e.feedback = { instruction: 'Head turns complete!', status: 'success' }
-      e.current = 'eyes_close'
-      e.feedback = { instruction: 'Close your eyes for 5 seconds...', status: 'waiting' }
+  const routine = routines[e.routineDay - 1] ?? getTodayRoutine()
+  const stepConfig = routine.steps[e.stepIndex]
+  if (!stepConfig) {
+    e.current = 'complete'
+    e.feedback = {
+      instruction: 'Exercise complete!',
+      status: 'success',
+      label: 'Complete!',
+      routineTitle: `Day ${e.routineDay}: ${e.routineTitle}`,
+      voice: 'Exercise complete. Great job.',
     }
     return e
   }
 
-  if (e.current === 'eyes_close') {
-    // ── Phase 1: calibrate open-eye EAR for 1.5 s (15 samples @ 100 ms) ──
-    const CALIB_NEEDED = 15
-    if (e.calibSamples.length < CALIB_NEEDED) {
-      if (faceKps && faceKps.length >= 387) {
-        const le = eyeEAR(faceKps, LEFT_EYE_EAR)
-        const re = eyeEAR(faceKps, RIGHT_EYE_EAR)
-        e.calibSamples = [...e.calibSamples, (le + re) / 2]
-      }
-      const pct = Math.round((e.calibSamples.length / CALIB_NEEDED) * 100)
-      e.feedback = { instruction: `Calibrating... keep eyes open (${pct}%)`, status: 'waiting', progress: pct / 100 }
-      return e
-    }
-    // compute threshold once calibration done
-    if (e.calibSamples.length === CALIB_NEEDED) {
-      const baseline = e.calibSamples.reduce((a, b) => a + b, 0) / e.calibSamples.length
-      e.eyeThreshold = baseline * ExerciseConfig.eyeCloseMultiplier
-      // push to > CALIB_NEEDED so we don't recompute
-      e.calibSamples = [...e.calibSamples, -1]
-    }
+  if (e.current !== stepConfig.id) {
+    e.current = stepConfig.id
+  }
 
-    // ── Phase 2: detect eyes closed ──
-    const eyesClosed = faceKps ? areEyesClosedFace(faceKps, e.eyeThreshold) : areEyesClosed(keypoints)
-    if (eyesClosed) {
-      e.eyeTimer += dt
-      const progress = Math.min(e.eyeTimer / 5000, 1)
-      const remaining = Math.ceil((5000 - e.eyeTimer) / 1000)
-      e.feedback = {
-        instruction: remaining > 0 ? `Keep eyes closed... ${remaining}s` : ' 5 seconds!',
-        status: 'in_progress',
-        progress
-      }
-      if (e.eyeTimer >= 5000) {
-        e.feedback = { instruction: 'Eyes closed! Great!', status: 'success' }
-        e.current = 'hands_up'
-        e.feedback = { instruction: 'Raise both hands beside your ears ', status: 'waiting' }
-        e.eyeTimer = 0
-      }
-    } else {
-      e.eyeTimer = 0
-      e.feedback = { instruction: 'Close your eyes...', status: 'in_progress', progress: 0 }
+  if (stepConfig.kind === 'timed') {
+    const duration = stepConfig.durationMs ?? HOLD_MS
+    e.holdTimer += dt
+    const progress = Math.min(e.holdTimer / duration, 1)
+    e.feedback = {
+      instruction: stepConfig.instruction,
+      status: 'in_progress',
+      progress,
+      label: stepConfig.label,
+      routineTitle: `Day ${e.routineDay}: ${e.routineTitle}`,
+      voice: stepConfig.voice,
+    }
+    if (e.holdTimer >= duration) {
+      completeCurrentStep(e, routine)
     }
     return e
   }
 
-  if (e.current === 'hands_up') {
-    if (bothHandsBesideEars(keypoints)) {
-      e.handTimer += dt
-      const progress = Math.min(e.handTimer / 2000, 1)
+  const metrics = headMetrics(keypoints)
+  if (!metrics) {
+    e.holdTimer = 0
+    e.feedback = {
+      instruction: 'Keep your face and shoulders visible',
+      status: 'in_progress',
+      progress: 0,
+      label: stepConfig.label,
+      routineTitle: `Day ${e.routineDay}: ${e.routineTitle}`,
+    }
+    return e
+  }
+
+  const side = ExerciseConfig.lookSideOffsetRatio
+  const neutral = Math.max(e.neutralHeadHeight, 0.001)
+  const downTarget = neutral * ExerciseConfig.lookDownRatio
+  const upTarget = neutral * ExerciseConfig.lookUpRatio
+
+  if (stepConfig.kind === 'calibrate') {
+    e.calibSamples = [...e.calibSamples, metrics.headHeight]
+    const progress = Math.min(e.calibSamples.length / 10, 1)
+    setStepFeedback(e, stepConfig, 'waiting', progress)
+    if (e.calibSamples.length >= CALIBRATION_SAMPLES) {
+      e.neutralHeadHeight = e.calibSamples.reduce((a, b) => a + b, 0) / e.calibSamples.length
+      completeCurrentStep(e, routine)
+    }
+    return e
+  }
+
+  if (stepConfig.kind === 'arms_up') {
+    const armsOk = bothArmsRaised(keypoints)
+    if (armsOk) {
+      e.holdTimer += dt
+      const progress = Math.min(e.holdTimer / (stepConfig.holdMs ?? HOLD_MS), 1)
       e.feedback = {
-        instruction: e.handTimer >= 2000 ? 'Hands held! Perfect!' : 'Hold your hands up...',
+        instruction: 'Hold your arms up...',
         status: 'in_progress',
-        progress
+        progress,
+        label: stepConfig.label,
+        routineTitle: `Day ${e.routineDay}: ${e.routineTitle}`,
+        voice: stepConfig.voice,
       }
-      if (e.handTimer >= 2000) {
-        e.feedback = { instruction: ' All exercises complete!', status: 'success' }
-        e.current = 'complete'
+      if (e.holdTimer >= (stepConfig.holdMs ?? HOLD_MS)) {
+        completeCurrentStep(e, routine)
       }
     } else {
-      e.handTimer = 0
-      const left = isHandBesideEar(keypoints, 'left')
-      const right = isHandBesideEar(keypoints, 'right')
-      let instr = 'Raise both hands beside your ears'
-      if (!left && !right) instr = 'Raise BOTH hands up beside your ears'
-      else if (!left) instr = 'Left hand needs to go up higher'
-      else if (!right) instr = 'Right hand needs to go up higher'
-      e.feedback = { instruction: instr, status: 'in_progress', progress: 0 }
+      e.holdTimer = 0
+      setStepFeedback(e, stepConfig, 'in_progress', 0)
+    }
+    return e
+  }
+
+  if (stepConfig.kind === 'chin_tuck') {
+    const targetReps = stepConfig.reps ?? 5
+    if (e.repPhase === 'down') {
+      if (metrics.headHeight < downTarget) {
+        e.repPhase = 'neutral'
+      }
+      e.feedback = {
+        instruction: `Lower your chin (${e.repCount}/${targetReps})`,
+        status: 'in_progress',
+        progress: e.repCount / targetReps,
+        label: stepConfig.label,
+        routineTitle: `Day ${e.routineDay}: ${e.routineTitle}`,
+        voice: stepConfig.voice,
+      }
+      return e
+    }
+
+    if (metrics.headHeight > neutral * 0.9) {
+      e.repCount += 1
+      e.repPhase = 'down'
+    }
+
+    const progress = Math.min(e.repCount / targetReps, 1)
+    e.feedback = {
+      instruction: e.repCount >= targetReps
+        ? 'Chin tucks complete'
+        : `Return to neutral (${e.repCount}/${targetReps})`,
+      status: 'in_progress',
+      progress,
+      label: stepConfig.label,
+      routineTitle: `Day ${e.routineDay}: ${e.routineTitle}`,
+      voice: stepConfig.voice,
+    }
+    if (e.repCount >= targetReps) {
+      completeCurrentStep(e, routine)
+    }
+    return e
+  }
+
+  if (stepConfig.kind === 'look') {
+    if (stepConfig.requireArms && !bothArmsRaised(keypoints)) {
+      e.holdTimer = 0
+      e.feedback = {
+        instruction: 'Keep both hands raised beside your head',
+        status: 'in_progress',
+        progress: 0,
+        label: stepConfig.label,
+        routineTitle: `Day ${e.routineDay}: ${e.routineTitle}`,
+        voice: stepConfig.voice,
+      }
+      return e
+    }
+
+    const ok =
+      stepConfig.direction === 'right' ? metrics.xOffset < -side :
+      stepConfig.direction === 'left' ? metrics.xOffset > side :
+      stepConfig.direction === 'down' ? metrics.headHeight < downTarget :
+      stepConfig.direction === 'up' ? metrics.headHeight > upTarget :
+      false
+
+    if (ok) {
+      e.holdTimer += dt
+      const progress = Math.min(e.holdTimer / (stepConfig.holdMs ?? HOLD_MS), 1)
+      e.feedback = {
+        instruction: `Hold for ${Math.round((stepConfig.holdMs ?? HOLD_MS) / 1000)} seconds...`,
+        status: 'in_progress',
+        progress,
+        label: stepConfig.label,
+        routineTitle: `Day ${e.routineDay}: ${e.routineTitle}`,
+        voice: stepConfig.voice,
+      }
+      if (e.holdTimer >= (stepConfig.holdMs ?? HOLD_MS)) {
+        completeCurrentStep(e, routine)
+      }
+    } else {
+      e.holdTimer = 0
+      const value = stepConfig.direction === 'down' || stepConfig.direction === 'up'
+        ? metrics.headHeight.toFixed(2)
+        : metrics.xOffset.toFixed(2)
+      e.feedback = {
+        instruction: `${stepConfig.instruction} (${value})`,
+        status: 'in_progress',
+        progress: 0,
+        label: stepConfig.label,
+        routineTitle: `Day ${e.routineDay}: ${e.routineTitle}`,
+        voice: stepConfig.voice,
+      }
     }
     return e
   }
